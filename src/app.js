@@ -69,6 +69,13 @@ btn.addEventListener('click', () => {
   }, 1000);
 });
 
+const a = document.createElement('a');
+const atext = document.createTextNode('github');
+a.appendChild(atext);
+a.href = 'https://github.com/apvilkko/climate-music';
+document.body.appendChild(document.createElement('br'));
+document.body.appendChild(a);
+
 reroll();
 
 const onTick = ctx => {
