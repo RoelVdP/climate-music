@@ -45,3 +45,12 @@ export const maybe = (prob, opt1, opt2) => {
 
 export const sample = arr =>
   (arr.length > 0 ? arr[randRange(0, arr.length - 1)] : undefined);
+
+export const shuffle = arr => {
+  const a = [...arr];
+  for (let i = a.length; i; i--) {
+    const j = Math.floor(Math.random() * i);
+    [a[i - 1], a[j]] = [a[j], a[i - 1]];
+  }
+  return a;
+};

@@ -1,4 +1,6 @@
-import {randRange, randFloat, rand, sample as randSample} from './random';
+import {
+  randRange, randFloat, rand, sample as randSample, shuffle
+} from './random';
 import {addInsert, createInsertEffect} from './audio';
 import createReverb from './reverb';
 import {createFeedbackDelay} from './delay';
@@ -36,12 +38,12 @@ export const getParams = () => ({
   PERC: {
     pitch: [-12, 12],
     reverb: [1, 4],
-    sample: [1, 4],
+    sample: [1, 6],
     length: [70, 200],
     velocity: [32, 127],
     feedback: [0.5, 0.8],
     delayTime: [0.5, 1.5],
-    reverbDry: [0.5, 0.8],
+    reverbDry: [0.3, 0.7],
     reverbWet: [0.7, 0.95],
     delayWet: [0.5, 0.8],
     filterFrequency: [1000, 16000],
@@ -84,19 +86,67 @@ const SCALES = [
 export const brightnessToScale = brightness =>
   SCALES[Math.floor(brightness * 7)];
 
-const getPadNote = (root, p) => {
+const getOrderedScale = p => {
   const scale = brightnessToScale(p.brightness);
-  const note = rand(30) ? randSample(scale.rest) : randSample(scale.priority);
-  return root + note + randRange(0, 1) * 12;
+  return scale.priority.concat(scale.rest).sort((a, b) => a - b);
 };
+
+const getRawNote = (p, anywhere) => {
+  const scale = brightnessToScale(p.brightness);
+  return anywhere ? randSample(scale.priority.concat(scale.rest)) : (
+    rand(30) ? randSample(scale.rest) : randSample(scale.priority)
+  );
+};
+
+const getPadNote = (root, p) =>
+  root + getRawNote(p) + randRange(0, 1) * 12;
+
+const getNoteFromScale = (scale, distance) => {
+  let index = distance;
+  let readjust = 0;
+  if (index > (scale.length - 1)) {
+    index -= scale.length;
+    readjust = 12;
+  }
+  return scale[index] + readjust;
+};
+
+const getTriad = (root, p, len) => {
+  const notes = [];
+  const first = getRawNote(p, true);
+  notes.push(first);
+  const scale = getOrderedScale(p);
+  const firstIndex = scale.indexOf(first);
+  const skewLeft = rand(50);
+  const distance2 = firstIndex + 1;
+  const distance3 = firstIndex + randRange(4, 6);
+  const note2 = getNoteFromScale(scale, distance2);
+  const note3 = getNoteFromScale(scale, distance3);
+  notes.push(skewLeft ? note2 : note3);
+  notes.push(skewLeft ? note3 : note2);
+  const line = shuffle(notes);
+  for (let i = line.length; i < len; ++i) {
+    line.push(randSample(notes));
+  }
+  const octaveShift = randRange(-2, 1) * 12;
+  let adjusted = line.map(i => root + i + octaveShift);
+  if (Math.max(...adjusted) > 19) {
+    adjusted = adjusted.map(i => i - 12);
+  }
+  if (Math.min(...adjusted) < -7) {
+    adjusted = adjusted.map(i => i + 12);
+  }
+  return adjusted;
+};
+
+const P_CLUSTER = 20;
+const P_TRIAD = 50;
 
 function* generatePad(params, root) {
   const p = params.PAD;
   let channel = 0;
   const sample = `pad${randRange(p.sample)}`;
-  let clusterMode = false;
-  let clusterAmount = 0;
-  let maxCluster = 0;
+  const clusterMode = {};
   while (true) {
     channel = ++channel % 4;
     const note = {
@@ -106,19 +156,26 @@ function* generatePad(params, root) {
       attack: randFloat(p.attack),
       sample,
     };
-    if (!clusterMode) {
-      if (rand(20)) {
-        clusterMode = true;
-        clusterAmount = 0;
-        maxCluster = randRange(2, 5);
+    if (!clusterMode.active) {
+      if (rand(P_CLUSTER)) {
+        clusterMode.active = true;
+        clusterMode.max = randRange(clusterMode.triad ? 3 : 2, 5);
+        clusterMode.triad = rand(P_TRIAD) ?
+          getTriad(root, p, clusterMode.max) : null;
+        clusterMode.amount = 0;
       }
     }
-    if (clusterMode) {
-      note.length = randRange(1, 4);
+    if (clusterMode.active) {
+      if (clusterMode.triad) {
+        note.pitch = clusterMode.triad[clusterMode.amount];
+        note.length = randRange(4, 16);
+      } else {
+        note.length = randRange(1, 4);
+      }
       note.velocity = randRange(50, 90);
-      clusterAmount++;
-      if (clusterAmount > maxCluster) {
-        clusterMode = false;
+      clusterMode.amount++;
+      if (clusterMode.amount > clusterMode.max) {
+        clusterMode.active = false;
       }
     }
     yield note;
@@ -144,7 +201,7 @@ const channelToParam = channel => channel.replace(/\d/g, '');
 const param = (params, key, defaultValue) =>
   (params[key] ? randFloat(params[key]) : defaultValue);
 
-const addEffects = (context, buffers, tracks, params, channels) => {
+const addEffects = (context, buffer, tracks, params, channels) => {
   const common = {context};
   const p = params[channelToParam(channels[0])];
   channels.forEach(channel => {
@@ -173,7 +230,7 @@ const addEffects = (context, buffers, tracks, params, channels) => {
     });
     addInsert(context, tracks, channel, insertDelay, 1);
 
-    const reverb = createReverb({...common, buffer: buffers.impulse1});
+    const reverb = createReverb({...common, buffer});
     const insertReverb = createInsertEffect({
       ...common,
       effect: reverb,
@@ -185,21 +242,24 @@ const addEffects = (context, buffers, tracks, params, channels) => {
   });
 };
 
-const initGenerators = (context, buffers, tracks, params) => {
-  loadSample(context, buffers, `impulse${randRange(params.PEDAL.reverb)}`)
+const initGenerators = (oldGenerators, context, buffers, tracks, params) => {
+  let buffer = `impulse${randRange(params.PEDAL.reverb)}`;
+  loadSample(context, buffers, buffer)
   .then(() => {
-    addEffects(context, buffers, tracks, params, ['PEDAL0', 'PEDAL1']);
+    addEffects(context, buffers[buffer], tracks, params, ['PEDAL0', 'PEDAL1']);
   });
 
-  loadSample(context, buffers, `impulse${randRange(params.PAD.reverb)}`)
+  buffer = `impulse${randRange(params.PAD.reverb)}`;
+  loadSample(context, buffers, buffer)
   .then(() => {
-    addEffects(context, buffers, tracks, params,
+    addEffects(context, buffers[buffer], tracks, params,
       ['PAD0', 'PAD1', 'PAD2', 'PAD3']);
   });
 
-  loadSample(context, buffers, `impulse${randRange(params.PERC.reverb)}`)
+  buffer = `impulse${randRange(params.PERC.reverb)}`;
+  loadSample(context, buffers, buffer)
   .then(() => {
-    addEffects(context, buffers, tracks, params, ['PERC']);
+    addEffects(context, buffers[buffer], tracks, params, ['PERC']);
   });
 
   const root = randRange(params.PEDAL.pitch);
@@ -208,7 +268,10 @@ const initGenerators = (context, buffers, tracks, params) => {
     generatePedal(params, root),
     generatePad(params, root),
     generatePerc(params),
-  ].map(gen => ({gen, nextNoteTime: 0}));
+  ].map((gen, i) => ({
+    gen,
+    nextNoteTime: oldGenerators.length > i ? oldGenerators[i].nextNoteTime : 0,
+  }));
 };
 
 export default initGenerators;

@@ -6,13 +6,13 @@ import initGenerators, {getParams, brightnessToScale} from './generator';
 
 const rootContext = createAudioContext();
 const tracks = createMixer(rootContext, {
-  PEDAL0: {gain: 0.4},
-  PEDAL1: {gain: 0.4},
+  PEDAL0: {gain: 0.5},
+  PEDAL1: {gain: 0.5},
   PAD0: {gain: 0.3},
   PAD1: {gain: 0.3},
   PAD2: {gain: 0.3},
   PAD3: {gain: 0.3},
-  PERC: {gain: 0.6},
+  PERC: {gain: 0.5},
 });
 const buffers = {};
 const samples = [
@@ -30,6 +30,8 @@ const samples = [
   'perc2',
   'perc3',
   'perc4',
+  'perc5',
+  'perc6',
 ];
 samples.forEach(name => loadSample(rootContext, buffers, name));
 
@@ -53,7 +55,7 @@ const showParams = params => {
 
 const reroll = () => {
   const params = getParams();
-  generators = initGenerators(rootContext, buffers, tracks, params);
+  generators = initGenerators(generators, rootContext, buffers, tracks, params);
   showParams(params);
 };
 
@@ -80,6 +82,9 @@ reroll();
 
 const onTick = ctx => {
   const timer = ctx.currentTime + SCHEDULE_AHEAD;
+  if (!playing) {
+    return;
+  }
   generators.forEach(gen => {
     const nextNoteTime = gen.nextNoteTime;
     if (nextNoteTime < timer) {
@@ -93,7 +98,7 @@ const onTick = ctx => {
           destination.inserts[0].effect.frequency.value =
             nextNote.filterFrequency;
         }
-        if (playing) {
+        if (nextNoteTime > 0) {
           playNote(ctx, buffer, tempo, destination, nextNote);
         }
       }
