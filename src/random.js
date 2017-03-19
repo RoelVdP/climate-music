@@ -1,11 +1,11 @@
-export const randRange = (minimum, maximum) => {
+export const randRange = (minimum, maximum, rng) => {
   let min = minimum;
   let max = maximum;
   if (typeof minimum === 'object') {
     min = minimum[0];
     max = minimum[1];
   }
-  return min + Math.floor(Math.random() * (max - min + 1));
+  return min + Math.floor((rng || Math.random)() * (max - min + 1));
 };
 
 export const randFloat = (minimum, maximum) => {

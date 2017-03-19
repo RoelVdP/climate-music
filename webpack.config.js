@@ -16,6 +16,13 @@ module.exports = {
   module: {
     rules: [
       {
+        test: /\.css$/,
+        use: [
+          {loader: 'style-loader'},
+          {loader: 'css-loader'},
+        ],
+      },
+      {
         test: /\.js$/,
         exclude: /node_modules/,
         use: [
@@ -37,7 +44,7 @@ module.exports = {
   },
   plugins: [
     new HtmlWebpackPlugin({
-      title: 'Ambient music generator'
+      template: 'template/index.ejs',
     })
   ],
 };

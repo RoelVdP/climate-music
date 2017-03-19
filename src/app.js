@@ -2,7 +2,10 @@ import startTick from './worker';
 import {createAudioContext, createMixer} from './audio';
 import playNote from './player';
 import loadSample from './loader';
-import initGenerators, {getParams, brightnessToScale} from './generator';
+import initGenerators, {getParams} from './generator';
+import {sample} from './random';
+
+import './styles.css';
 
 const rootContext = createAudioContext();
 const tracks = createMixer(rootContext, {
@@ -35,6 +38,8 @@ const samples = [
 ];
 samples.forEach(name => loadSample(rootContext, buffers, name));
 
+let rawData;
+let currentCountry;
 let generators = [];
 
 const SCHEDULE_AHEAD = 0.1;
@@ -42,43 +47,55 @@ const tempo = 120;
 const noteLength = 0.25;
 let playing = false;
 
-const p = document.createElement('p');
+const p = document.getElementById('playing');
 const ptext = document.createTextNode('');
 p.appendChild(ptext);
-document.body.appendChild(p);
 
-const showParams = params => {
-  const brightness = params.PAD.brightness;
-  const scaleName = brightnessToScale(brightness).name;
-  ptext.nodeValue = `brightness: ${brightness} (${scaleName})`;
+const showParams = (/* params */) => {
+  // const brightness = params.PAD.brightness;
+  // const scaleName = brightnessToScale(brightness).name;
+  // ptext.nodeValue = `Playing "${currentCountry}"`;
 };
 
 const reroll = () => {
-  const params = getParams();
+  const params = getParams(rawData, currentCountry);
   generators = initGenerators(generators, rootContext, buffers, tracks, params);
   showParams(params);
 };
 
-const btn = document.createElement('button');
-const text = document.createTextNode('change it');
-btn.appendChild(text);
-document.body.appendChild(btn);
-btn.addEventListener('click', () => {
+const getSelected = () => document.getElementById('select-country').value;
+
+const countryChanged = () => {
+  document.getElementById('select-country').value = currentCountry;
   playing = false;
   reroll();
   setTimeout(() => {
     playing = true;
   }, 1000);
-});
+};
 
-const a = document.createElement('a');
-const atext = document.createTextNode('github');
-a.appendChild(atext);
-a.href = 'https://github.com/apvilkko/climate-music';
-document.body.appendChild(document.createElement('br'));
-document.body.appendChild(a);
+const setupUi = data => {
+  const select = document.getElementById('select-country');
+  const countries = Object.keys(data.data);
+  currentCountry = sample(countries);
+  countries.forEach(country => {
+    const option = document.createElement('option');
+    const otext = document.createTextNode(country);
+    option.appendChild(otext);
+    option.value = country;
+    select.appendChild(option);
+  });
+  select.addEventListener('change', () => {
+    currentCountry = getSelected();
+    countryChanged();
+  });
 
-reroll();
+  const btn = document.getElementById('random');
+  btn.addEventListener('click', () => {
+    currentCountry = sample(countries);
+    countryChanged();
+  });
+};
 
 const onTick = ctx => {
   const timer = ctx.currentTime + SCHEDULE_AHEAD;
@@ -110,7 +127,11 @@ const startWorker = () => {
   startTick(rootContext, onTick);
 };
 
-startWorker();
-setTimeout(() => {
-  playing = true;
-}, 1000);
+fetch('data.json').then(response => {
+  response.json().then(data => {
+    rawData = data;
+    setupUi(rawData);
+    startWorker();
+    countryChanged();
+  });
+});

@@ -1,3 +1,4 @@
+import seedrandom from 'seedrandom';
 import {
   randRange, randFloat, rand, sample as randSample, shuffle
 } from './random';
@@ -7,48 +8,89 @@ import {createFeedbackDelay} from './delay';
 import loadSample from './loader';
 import createFilter from './filter';
 
-export const getParams = () => ({
-  PEDAL: {
-    pitch: [-7, 4],
-    reverb: [1, 4],
-    sample: [1, 4],
-    length: [12, 64],
-    velocity: [100, 127],
-    attack: [0.1, 1.0],
-    delayTime: [0.5, 1.5],
-    reverbDry: [0.5, 0.8],
-    reverbWet: [0.7, 0.95],
-    delayWet: [0.5, 0.8],
-    filterFrequency: [100, 5000],
-  },
-  PAD: {
-    brightness: randFloat(0.0, 1.0),
-    reverb: [1, 4],
-    pitch: [-7, 4],
-    sample: [1, 6],
-    length: [32, 128],
-    velocity: [30, 127],
-    attack: [0.5, 1.0],
-    delayTime: [0.5, 1.5],
-    reverbDry: [0.5, 0.8],
-    reverbWet: [0.7, 0.95],
-    delayWet: [0.5, 0.8],
-    filterFrequency: [300, 8000],
-  },
-  PERC: {
-    pitch: [-12, 12],
-    reverb: [1, 4],
-    sample: [1, 6],
-    length: [70, 200],
-    velocity: [32, 127],
-    feedback: [0.5, 0.8],
-    delayTime: [0.5, 1.5],
-    reverbDry: [0.3, 0.7],
-    reverbWet: [0.7, 0.95],
-    delayWet: [0.5, 0.8],
-    filterFrequency: [1000, 16000],
+const TOTAL_CO2 = 8;
+const TOTAL_CH4 = 9;
+const TOTAL_N2O = 10;
+const STD = 0;
+const TREND = 1;
+const JUMP = 2;
+
+const combine = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+const normalizeTrend = val => 0.5 + val / 2;
+
+const spread = (val, factor = 0.2) => {
+  let ret = val / factor - (0.5 / factor) + 0.5;
+  if (ret > 1) {
+    ret = 1;
   }
-});
+  if (ret < 0) {
+    ret = 0;
+  }
+  return ret;
+};
+
+const clampStd = val => {
+  const ret = Math.log(val + 1) / 8;
+  return ret;
+};
+
+export const getParams = (rawData, country) => {
+  const data = rawData.data[country];
+  const seed = `${country}${data[TOTAL_CH4].join('')}${data[TOTAL_CO2].join('')}`;
+  const rng = seedrandom(seed);
+  const brightness = normalizeTrend(-1 *
+    combine([data[TOTAL_CH4][TREND], data[TOTAL_CO2][TREND]]));
+  const std = clampStd(combine([data[TOTAL_CH4][STD], data[TOTAL_CO2][STD]]));
+  const no2trend = spread(normalizeTrend(data[TOTAL_N2O][TREND]));
+  const ch4trend = spread(normalizeTrend(data[TOTAL_CH4][TREND]));
+  const mellowness =
+    Math.abs(combine([data[TOTAL_CH4][JUMP], data[TOTAL_CO2][JUMP]]) - 0.05);
+  const padLen = 96 + mellowness * 2 * 64;
+  return {
+    rng,
+    PEDAL: {
+      pitch: [-7, 4],
+      reverb: [1, 4],
+      sample: [1, 4],
+      length: [12, 64],
+      velocity: [100, 127],
+      attack: [0.1, 1.0],
+      delayTime: [0.5, 1.5],
+      reverbDry: [0.5, 0.8],
+      reverbWet: [0.7, 0.95],
+      delayWet: [0.5, 0.8],
+      filterFrequency: [100 + 100 * no2trend, 500 + 4500 * no2trend],
+    },
+    PAD: {
+      brightness,
+      mellowness,
+      reverb: [1, 4],
+      pitch: [-7, 4],
+      sample: [1, 6],
+      length: [32, padLen],
+      velocity: [30, 127],
+      attack: [0.5, 1.0],
+      delayTime: [0.5, 1.5],
+      reverbDry: [0.5, 0.8],
+      reverbWet: [0.7, 0.95],
+      delayWet: [0.5, 0.8],
+      filterFrequency: [250 + 100 * ch4trend, 600 + 7400 * ch4trend],
+    },
+    PERC: {
+      pitch: [-12, 12],
+      reverb: [1, 4],
+      sample: [1, 6],
+      length: [70, 200],
+      velocity: [32, 127],
+      feedback: [0.5, 0.8],
+      delayTime: [0.5, 1.5],
+      reverbDry: [0.3, 0.7],
+      reverbWet: [0.7, 0.95],
+      delayWet: [0.5, 0.8],
+      filterFrequency: [500 + std * 10000, 9000 + std * 7000],
+    }
+  };
+};
 
 const commonNote = p => ({
   length: randRange(p.length),
@@ -60,7 +102,7 @@ function* generatePedal(params, root) {
   const p = params.PEDAL;
   let channel = 0;
   const pitch = root;
-  const sample = `bass${randRange(p.sample)}`;
+  const sample = `bass${randRange(p.sample, null, p.rng)}`;
   while (true) {
     channel = ++channel % 2;
     yield {
@@ -139,13 +181,12 @@ const getTriad = (root, p, len) => {
   return adjusted;
 };
 
-const P_CLUSTER = 20;
 const P_TRIAD = 50;
 
 function* generatePad(params, root) {
   const p = params.PAD;
   let channel = 0;
-  const sample = `pad${randRange(p.sample)}`;
+  const sample = `pad${randRange(p.sample, null, p.rng)}`;
   const clusterMode = {};
   while (true) {
     channel = ++channel % 4;
@@ -157,7 +198,8 @@ function* generatePad(params, root) {
       sample,
     };
     if (!clusterMode.active) {
-      if (rand(P_CLUSTER)) {
+      const pCluster = 10 + (1 - p.mellowness) * 30;
+      if (rand(pCluster)) {
         clusterMode.active = true;
         clusterMode.max = randRange(clusterMode.triad ? 3 : 2, 5);
         clusterMode.triad = rand(P_TRIAD) ?
@@ -174,8 +216,9 @@ function* generatePad(params, root) {
       }
       note.velocity = randRange(50, 90);
       clusterMode.amount++;
-      if (clusterMode.amount > clusterMode.max) {
+      if (clusterMode.amount >= clusterMode.max) {
         clusterMode.active = false;
+        clusterMode.triad = null;
       }
     }
     yield note;
@@ -184,7 +227,7 @@ function* generatePad(params, root) {
 
 function* generatePerc(params) {
   const p = params.PERC;
-  const sample = `perc${randRange(p.sample)}`;
+  const sample = `perc${randRange(p.sample, null, p.rng)}`;
   const pitch = randRange(p.pitch);
   while (true) {
     yield {
